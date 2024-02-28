@@ -5,6 +5,8 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
 using osu.Framework.Audio.Sample;
 using osu.Framework.Bindables;
 using osu.Framework.Graphics;
@@ -13,13 +15,14 @@ using osu.Game.Beatmaps;
 using osu.Game.Rulesets.Mania.Beatmaps;
 using osu.Game.Rulesets.Objects.Legacy;
 using osu.Game.Rulesets.Scoring;
+using osu.Game.Screens.Play.HUD;
 using osu.Game.Skinning;
 
 namespace osu.Game.Rulesets.Mania.Skinning.Legacy
 {
     public class ManiaLegacySkinTransformer : LegacySkinTransformer
     {
-        public override bool IsProvidingLegacyResources => base.IsProvidingLegacyResources || hasKeyTexture.Value;
+        private readonly ManiaBeatmap beatmap;
 
         /// <summary>
         /// Mapping of <see cref="HitResult"/> to their corresponding
@@ -59,8 +62,6 @@ namespace osu.Game.Rulesets.Mania.Skinning.Legacy
         /// </summary>
         private readonly Lazy<bool> hasKeyTexture;
 
-        private readonly ManiaBeatmap beatmap;
-
         public ManiaLegacySkinTransformer(ISkin skin, IBeatmap beatmap)
             : base(skin)
         {
@@ -74,14 +75,30 @@ namespace osu.Game.Rulesets.Mania.Skinning.Legacy
             });
         }
 
-        public override Drawable GetDrawableComponent(ISkinComponentLookup lookup)
+        public override Drawable GetDrawableComponent(ISkinComponent component)
         {
-            switch (lookup)
+            switch (component)
             {
-                case GameplaySkinComponentLookup<HitResult> resultComponent:
+                case SkinnableTargetComponent targetComponent:
+                    if (targetComponent.Target == SkinnableTarget.MainHUDComponents)
+                    {
+                        var components = base.GetDrawableComponent(component) as SkinnableTargetComponentsContainer;
+                        if (components == null) return null;
+
+                        foreach (var comboSplash in components.OfType<LegacyComboSplash>())
+                        {
+                            comboSplash.BurstCondition = combo => combo > 0 && combo % 100 == 0;
+                        }
+
+                        return components;
+                    }
+
+                    break;
+
+                case GameplaySkinComponent<HitResult> resultComponent:
                     return getResult(resultComponent.Component);
 
-                case ManiaSkinComponentLookup maniaComponent:
+                case ManiaSkinComponent maniaComponent:
                     if (!isLegacySkin.Value || !hasKeyTexture.Value)
                         return null;
 
@@ -114,20 +131,21 @@ namespace osu.Game.Rulesets.Mania.Skinning.Legacy
                             return new LegacyHitExplosion();
 
                         case ManiaSkinComponents.StageBackground:
-                            return new LegacyStageBackground();
+                            Debug.Assert(maniaComponent.StageDefinition != null);
+                            return new LegacyStageBackground(maniaComponent.StageDefinition.Value);
 
                         case ManiaSkinComponents.StageForeground:
                             return new LegacyStageForeground();
 
-                        case ManiaSkinComponents.BarLine:
-                            return null; // Not yet implemented.
-
                         default:
-                            throw new UnsupportedSkinComponentException(lookup);
+                            throw new UnsupportedSkinComponentException(component);
                     }
+
+                case LegacyComboSplash.LegacyComboSplashComponent:
+                    return new LegacyComboSplash.LegacyComboSplashSide("comboburst-mania");
             }
 
-            return base.GetDrawableComponent(lookup);
+            return base.GetDrawableComponent(component);
         }
 
         private Drawable getResult(HitResult result)
@@ -138,7 +156,7 @@ namespace osu.Game.Rulesets.Mania.Skinning.Legacy
             string filename = this.GetManiaSkinConfig<string>(hit_result_mapping[result])?.Value
                               ?? default_hit_result_skin_filenames[result];
 
-            var animation = this.GetAnimation(filename, true, true, frameLength: 1000 / 20d);
+            var animation = this.GetAnimation(filename, true, true);
             return animation == null ? null : new LegacyManiaJudgementPiece(result, animation);
         }
 
@@ -154,9 +172,7 @@ namespace osu.Game.Rulesets.Mania.Skinning.Legacy
         public override IBindable<TValue> GetConfig<TLookup, TValue>(TLookup lookup)
         {
             if (lookup is ManiaSkinConfigurationLookup maniaLookup)
-            {
-                return base.GetConfig<LegacyManiaSkinConfigurationLookup, TValue>(new LegacyManiaSkinConfigurationLookup(beatmap.TotalColumns, maniaLookup.Lookup, maniaLookup.ColumnIndex));
-            }
+                return base.GetConfig<LegacyManiaSkinConfigurationLookup, TValue>(new LegacyManiaSkinConfigurationLookup(beatmap.TotalColumns, maniaLookup.Lookup, maniaLookup.TargetColumn));
 
             return base.GetConfig<TLookup, TValue>(lookup);
         }
